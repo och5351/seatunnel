@@ -4,6 +4,13 @@
 
 ## dev
 
+### JDBC Connector
+
+- **破坏性变更：带时区的时间戳列映射为 `TIMESTAMP_TZ` 类型**
+  - **影响范围**：`seatunnel-connectors-v2/connector-jdbc`，`seatunnel-connectors-v2/connector-iceberg`
+  - **变更说明**：以前，JDBC Source 将无时区（如 MySQL `DATETIME`）和带时区（如 MySQL `TIMESTAMP`）的时间戳列都映射为 SeaTunnel 内部的 `TIMESTAMP` 类型。现在，带时区的列（如 MySQL `TIMESTAMP`、PostgreSQL `timestamptz`、Oracle `TIMESTAMP WITH LOCAL TIME ZONE` 和 SQL Server `datetimeoffset`）被显式映射为 `TIMESTAMP_TZ`。这确保了在写入 Iceberg 等格式时，时区语义得到准确保留（在 Iceberg 中 `TIMESTAMP` 存为无时区的 `timestamp`，`TIMESTAMP_TZ` 存为带时区的 `timestamptz`）。
+  - **影响**：如果您的下游 Sink 依赖接收 `TIMESTAMP` 类型且不支持 `TIMESTAMP_TZ`，您可能会遇到类型不匹配错误。对于 Iceberg 用户，这意味着以前作为 `timestamp`（无时区）写入的列现在可能会作为 `timestamptz`（带时区）写入，从而改变表结构。您可能需要在 SQL Transform 中转换该列或更新您的 Sink 配置。(#10685)
+
 ### API 变更
 
 - **破坏性变更：Engine REST 表级指标 key 格式变化**

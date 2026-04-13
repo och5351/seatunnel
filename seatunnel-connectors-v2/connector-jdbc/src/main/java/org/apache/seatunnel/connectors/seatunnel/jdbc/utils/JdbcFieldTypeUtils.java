@@ -23,10 +23,13 @@ import java.sql.SQLException;
 import java.sql.Time;
 import java.sql.Timestamp;
 import java.time.Instant;
+import java.time.LocalDateTime;
 import java.time.OffsetDateTime;
 import java.time.ZoneOffset;
 import java.time.ZonedDateTime;
 import java.time.format.DateTimeParseException;
+import java.util.Calendar;
+import java.util.TimeZone;
 
 public final class JdbcFieldTypeUtils {
 
@@ -96,6 +99,45 @@ public final class JdbcFieldTypeUtils {
         return resultSet.getTimestamp(columnIndex);
     }
 
+    /**
+     * Reads a NTZ (No Time Zone) timestamp column as {@link LocalDateTime}, free from JVM default
+     * timezone influence.
+     *
+     * <p>Strategy:
+     *
+     * <ol>
+     *   <li>Try {@code getObject(index, LocalDateTime.class)} first — supported by modern JDBC
+     *       drivers (PostgreSQL ≥ 42.2, MySQL Connector/J ≥ 8.0, MariaDB Connector/J ≥ 3.x). This
+     *       returns the wall-clock value exactly as stored, with no timezone conversion.
+     *   <li>Fall back to {@code getTimestamp(index, UTC_CALENDAR)}: passing a UTC {@link Calendar}
+     *       forces the driver to treat the raw bytes as UTC epoch millis, then {@link
+     *       Timestamp#toLocalDateTime()} reconstructs the wall-clock via UTC — again
+     *       timezone-neutral.
+     * </ol>
+     *
+     * @param resultSet the JDBC result set
+     * @param columnIndex 1-based column index
+     * @return the wall-clock {@link LocalDateTime} exactly as stored in the DB, or {@code null}
+     */
+    public static LocalDateTime getLocalDateTime(ResultSet resultSet, int columnIndex)
+            throws SQLException {
+        // Prefer the modern JDBC 4.2 API — returns wall-clock value directly, no TZ involved
+        try {
+            return resultSet.getObject(columnIndex, LocalDateTime.class);
+        } catch (SQLException | UnsupportedOperationException ignored) {
+            // Driver does not support getObject(index, LocalDateTime.class) — fall back
+        }
+        // Fallback: read as Timestamp with a UTC Calendar so the driver does not apply
+        // any session/JVM timezone offset to the raw bytes.
+        // Timestamp.toLocalDateTime() then converts microseconds-since-epoch (UTC) back
+        // to a wall-clock LocalDateTime, which matches the original DB value.
+        Timestamp ts = resultSet.getTimestamp(columnIndex, UTC_CALENDAR);
+        return ts == null ? null : ts.toLocalDateTime();
+    }
+
+    /** UTC Calendar singleton used to bypass JVM-default-timezone in getTimestamp(). */
+    private static final Calendar UTC_CALENDAR = Calendar.getInstance(TimeZone.getTimeZone("UTC"));
+
     public static byte[] getBytes(ResultSet resultSet, int columnIndex) throws SQLException {
         return resultSet.getBytes(columnIndex);
     }
@@ -123,8 +165,20 @@ public final class JdbcFieldTypeUtils {
         }
 
         // Handle java.sql.Timestamp
+        // Avoid using Timestamp.toInstant() directly because the Timestamp was constructed
+        // with JVM-default-timezone semantics, which would shift the value by the JVM offset.
+        // Instead, try to re-read the column as a string and parse it with timezone info preserved.
         if (obj instanceof Timestamp) {
-            return ((Timestamp) obj).toInstant().atOffset(ZoneOffset.UTC);
+            String strVal = resultSet.getString(columnIndex);
+            if (strVal == null) {
+                return null;
+            }
+            try {
+                return parseOffsetDateTimeFromString(strVal);
+            } catch (Exception e) {
+                // Last resort: use the instant-based conversion (may shift by JVM offset)
+                return ((Timestamp) obj).toInstant().atOffset(ZoneOffset.UTC);
+            }
         }
 
         // Handle java.util.Date

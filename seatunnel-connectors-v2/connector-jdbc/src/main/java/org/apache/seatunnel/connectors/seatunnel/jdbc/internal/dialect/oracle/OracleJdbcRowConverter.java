@@ -28,6 +28,8 @@ import java.io.ByteArrayInputStream;
 import java.io.StringReader;
 import java.sql.PreparedStatement;
 import java.sql.SQLException;
+import java.sql.Timestamp;
+import java.time.OffsetDateTime;
 
 import static org.apache.seatunnel.connectors.seatunnel.jdbc.internal.dialect.oracle.OracleTypeConverter.ORACLE_BLOB;
 import static org.apache.seatunnel.connectors.seatunnel.jdbc.internal.dialect.oracle.OracleTypeConverter.ORACLE_CLOB;
@@ -66,6 +68,11 @@ public class OracleJdbcRowConverter extends AbstractJdbcRowConverter {
             } else {
                 statement.setString(statementIndex, (String) value);
             }
+        } else if (seaTunnelDataType.getSqlType().equals(SqlType.TIMESTAMP_TZ)) {
+            // Oracle JDBC does not support OffsetDateTime directly via setObject in all drivers.
+            // Convert to java.sql.Timestamp using the UTC instant to preserve the correct moment.
+            OffsetDateTime odt = (OffsetDateTime) value;
+            statement.setTimestamp(statementIndex, Timestamp.from(odt.toInstant()));
         } else {
             super.setValueToStatementByDataType(
                     value, statement, seaTunnelDataType, statementIndex, sourceType);
