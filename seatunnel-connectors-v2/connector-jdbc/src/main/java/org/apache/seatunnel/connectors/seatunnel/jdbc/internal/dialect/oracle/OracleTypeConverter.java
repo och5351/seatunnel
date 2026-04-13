@@ -390,7 +390,7 @@ public class OracleTypeConverter implements TypeConverter<BasicTypeDefine> {
                     builder.columnType(ORACLE_TIMESTAMP);
                 } else {
                     int timestampScale = column.getScale();
-                    if (column.getScale() > MAX_TIMESTAMP_SCALE) {
+                    if (timestampScale > MAX_TIMESTAMP_SCALE) {
                         log.warn(
                                 "The timestamp column {} type timestamp({}) is out of range, "
                                         + "which exceeds the maximum scale of {}, "
